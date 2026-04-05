@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>后室：任务突围 - 最终修复版</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; cursor: none; }
+        #noise { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; opacity: 0.05; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E"); }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; transform: translate(-50%, -50%); pointer-events: none; z-index: 15; background: rgba(255, 255, 255, 0.9); border-radius: 50%; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #dcdcdc; z-index: 5; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+        #mission-ui { position: absolute; top: 60px; left: 20px; color: #ff5555; z-index: 5; font-size: 16px; text-shadow: 1px 1px 0 #000; pointer-events: none; background: rgba(0,0,0,0.5); padding: 10px; border-left: 3px solid #ff5555; }
+        #status-bars { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 350px; text-align: center; z-index: 5; }
+        .bar-container { width: 100%; height: 10px; background: #222; margin-bottom: 5px; border: 1px solid #444; position: relative; }
+        #stamina-bar { width: 100%; height: 100%; background: #4caf50; transition: width 0.2s; }
+        #weight-val { width: 0%; height: 100%; background: #2196f3; transition: width 0.2s; }
+        #adrenaline-text { color: #ffeb3b; font-weight: bold; font-size: 14px; opacity: 0; transition: opacity 0.3s; }
+        /* 小地图 */
+        #minimap { position: absolute; top: 20px; right: 20px; width: 200px; height: 200px; background: rgba(0, 0, 0, 0.8); border: 2px solid #555; z-index: 5; display: block; }
+        /* 全屏战术地图 */
+        #tactical-map { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80vw; height: 80vh; background: rgba(10, 12, 10, 0.95); border: 4px solid #e0c060; z-index: 50; display: none; box-shadow: 0 0 50px rgba(0,0,0,0.8); cursor: crosshair; }
+        #tactical-canvas { width: 100%; height: 100%; }
+        #tactical-map h2 { position: absolute; top: 10px; left: 20px; color: #e0c060; margin: 0; pointer-events: none; }
+        .panel-ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 400px; background: rgba(10, 10, 10, 0.95); border: 2px solid #e0c060; padding: 20px; color: #fff; z-index: 25; display: none; box-shadow: 0 0 20px rgba(224, 192, 96, 0.3); max-height: 80vh; overflow-y: auto; }
+        .panel-ui h3 { margin-top: 0; color: #e0c060; border-bottom: 1px solid #555; padding-bottom: 10px; display: flex; justify-content: space-between; }
+        .item-slot { background: #222; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #444; }
+        button.action-btn { background: #444; color: #fff; border: 1px solid #666; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+        .btn-sell { background: #2e7d32; border-color: #4caf50; }
+        .btn-buy { background: #c62828; border-color: #e53935; }
+        #start-screen, #game-over { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; color: #dcdcdc; z-index: 20; cursor: default; }
+        #game-over { display: none; background: rgba(50, 0, 0, 0.95); }
+        h1 { font-size: 60px; color: #e0c060; text-transform: uppercase; letter-spacing: 5px; margin: 0 0 20px 0; }
+        .controls { display: flex; gap: 40px; margin-top: 20px; text-align: left; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; }
+        .key { background: #333; padding: 5px 10px; border-radius: 4px; border: 1px solid #555; color: #fff; font-weight: bold; }
+        button.start-btn { background: #e0c060; border: none; padding: 15px 40px; font-size: 20px; cursor: pointer; font-family: inherit; margin-top: 30px; font-weight: bold; }
+        button.start-btn:hover { background: #fff; }
+        #notification { position: absolute; top: 20%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 24px; opacity: 0; transition: opacity 0.5s; pointer-events: none; z-index: 6; }
+        /* 透视光柱效果 */
+        #xray-beam { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 4px; height: 100%; background: linear-gradient(to bottom, rgba(255,0,255,0), rgba(255,0,255,0.8), rgba(255,0,255,0)); box-shadow: 0 0 10px #ff00ff; pointer-events: none; z-index: 4; display: none; }
+    </style>
+</head>
+<body>
+    <div id="noise"></div>
+    <div id="xray-beam"></div>
+    <div id="crosshair"></div>
+    <div id="ui">
+        <div>距离怪物: <span id="distance">0</span>m</div>
+        <div>撤离点: <span id="exit-dist">0</span>m</div>
+    </div>
+    <div id="mission-ui">
+        <div>任务进度: <span id="mission-count">0</span> / <span id="mission-target">3</span></div>
+        <div style="font-size:12px; color:#aaa;" id="mission-status">寻找任务物品...</div>
+    </div>
+    <div id="status-bars">
+        <div id="adrenaline-text">⚠️ 肾上腺素爆发!</div>
+        <div class="bar-container">
+            <div id="stamina-bar"></div>
+            <div style="position:absolute; top:-20px; left:0; color:#fff; font-size:12px;">体力</div>
+        </div>
+        <div class="bar-container" style="height:6px; margin:0; border:none; background:#333;">
+            <div id="weight-val"></div>
+        </div>
+        <div style="color:#aaa; font-size:10px; margin-top:2px;">负重: <span id="weight-text">0/60</span> kg</div>
+    </div>
+    <div id="minimap"><canvas id="minimap-canvas" width="200" height="200"></canvas></div>
+    <div id="tactical-map"> 
+        <h2>战术地图 (按 F 关闭)</h2>
+        <canvas id="tactical-canvas"></canvas>
+    </div>
+    <div id="backpack-ui" class="panel-ui">
+        <h3>🎒 背包 (按 E 关闭)</h3>
+        <div id="inventory-list"></div>
+        <p style="font-size:12px; color:#888; margin-top:10px;">按 Q 丢弃最重物品</p>
+    </div>
+    <div id="shop-ui" class="panel-ui">
+        <h3>🛒 黑市商店 <span style="font-size:16px; color:#ffd700;">💰 <span id="shop-money">0</span></span></h3>
+        <div id="shop-list"></div>
+        <p style="font-size:12px; color:#888; margin-top:10px;">按 R 关闭商店</p>
+    </div>
+    <div id="notification"></div>
+    <div id="start-screen">
+        <h1>后室：任务突围</h1>
+        <p>收集任务物品激活撤离点，注意地形变化。</p>
+        <div class="controls">
+            <div>
+                <h3>🏃 幸存者</h3>
+                <p><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> 移动</p>
+                <p><span class="key">双击 W</span> 肾上腺素爆发</p>
+                <p><span class="key">Shift</span> 滑铲</p>
+                <p><span class="key">E</span> 打开背包</p>
+                <p><span class="key">R</span> 打开商店</p>
+                <p><span class="key">F</span> <b>战术地图 (标点导航)</b></p>
+            </div>
+        </div>
+        <button class="start-btn" onclick="startGame()">开始游戏</button>
+    </div>
+    <div id="game-over">
+        <h2 id="end-title">你被抓住了</h2>
+        <button class="start-btn" onclick="location.reload()">重新开始</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- 游戏配置 ---
+        const WALL_HEIGHT = 4;
+        const ROOM_SIZE = 10;
+        const MAP_SIZE = 50;
+        const MISSION_TARGET = 3;
+        let gameActive = false;
+        let clock = new THREE.Clock();
+        let playerMoney = 0;
+
+        // --- 任务与导航状态 ---
+        const missionState = { 
+            count: 0, 
+            target: MISSION_TARGET, 
+            active: false 
+        };
+        const navState = { 
+            mapOpen: false, 
+            targetX: 0, 
+            targetZ: 0 
+        };
+
+        // --- 玩家状态 ---
+        const playerState = { 
+            stamina: 200, 
+            maxStamina: 200, 
+            isAdrenaline: false, 
+            adrenalineTimer: 0, 
+            exhaustion: false, 
+            lastWPressTime: 0, 
+            backpackOpen: false, 
+            shopOpen: false, 
+            weight: 0, 
+            maxWeight: 60, 
+            inventory: [] 
+        };
+
+        // --- 场景 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdcdcaa);
+        scene.fog = new THREE.Fog(0xdcdcaa, 0, 30);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- 材质 ---
+        function createTexture(color, noise) {
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            const x = c.getContext('2d');
+            x.fillStyle = color; x.fillRect(0,0,64,64);
+            for(let i=0;i<400;i++) x.fillStyle=`rgba(0,0,0,${Math.random()*noise})`, x.fillRect(Math.random()*64,Math.random()*64,2,2);
+            const t = new THREE.CanvasTexture(c);
+            t.magFilter = THREE.NearestFilter;
+            return t;
+        }
+        const wallMat = new THREE.MeshStandardMaterial({ map: createTexture('#c7b377', 0.2) });
+        const floorMat = new THREE.MeshStandardMaterial({ map: createTexture('#8f8266', 0.1) });
+
+        // --- 地图与特殊地形 ---
+        const walls = [];
+        const specialZones = [];
+        const mapGroup = new THREE.Group();
+        scene.add(mapGroup);
+
+        function addSpecialZone(x, z, w, h, type) {
+            specialZones.push({ 
+                x: x * ROOM_SIZE, 
+                z: z * ROOM_SIZE, 
+                w: w * ROOM_SIZE, 
+                h: h * ROOM_SIZE, 
+                type: type 
+            });
+        }
+        addSpecialZone(10, 10, 5, 5, 'pool'); // 蓝色水池
+        addSpecialZone(-20, -20, 8, 8, 'roof'); // 白色天台
+        addSpecialZone(30, -10, 4, 10, 'danger'); // 红色危险区
+
+        for (let x = -MAP_SIZE; x <= MAP_SIZE; x++) {
+            for (let z = -MAP_SIZE; z <= MAP_SIZE; z++) {
+                if (x === -MAP_SIZE || x === MAP_SIZE || z === -MAP_SIZE || z === MAP_SIZE) {
+                    createWall(x * ROOM_SIZE, z * ROOM_SIZE);
+                } else if (Math.abs(x) > 3 || Math.abs(z) > 3) {
+                    if (Math.random() < 0.2) createWall(x * ROOM_SIZE, z * ROOM_SIZE);
+                }
+            }
+        }
+
+        function createWall(x, z) {
+            const w = new THREE.Mesh(new THREE.BoxGeometry(ROOM_SIZE, WALL_HEIGHT, ROOM_SIZE), wallMat);
+            w.position.set(x, WALL_HEIGHT / 2, z);
+            mapGroup.add(w);
+            walls.push(w);
+        }
+
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE*2*ROOM_SIZE, MAP_SIZE*2*ROOM_SIZE), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        mapGroup.add(floor);
+
+        // --- 灯光 ---
+        scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+        const pLight = new THREE.PointLight(0xffaa00, 1, 20);
+        scene.add(pLight);
+
+        // --- 玩家 ---
+        const player = { mesh: new THREE.Group(), speed: 14 };
+        player.mesh.add(camera);
+        camera.position.set(0, 1.8, 0);
+        scene.add(player.mesh);
+
+        // --- 物品 ---
+        const itemTypes = [
+            { name: "任务硬盘", weight: 5, color: 0x00ffff, price: 100, desc: "任务物品", isMission: true },
+            { name: "医疗包", weight: 5, color: 0xff0000, price: 50, desc: "恢复体力", isMission: false },
+            { name: "电池组", weight: 8, color: 0xffff00, price: 30, desc: "高价值物资", isMission: false },
+            { name: "金砖", weight: 15, color: 0xFFD700, price: 100, desc: "非常值钱", isMission: false }
+        ];
+        const items = [];
+        for(let i=0; i<60; i++) {
+            const type = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+            const geo = new THREE.BoxGeometry(1, 1, 1);
+            const mat = new THREE.MeshBasicMaterial({ color: type.color });
+            const mesh = new THREE.Mesh(geo, mat);
+            let ix = (Math.floor(Math.random() * (MAP_SIZE * 2)) - MAP_SIZE) * ROOM_SIZE;
+            let iz = (Math.floor(Math.random() * (MAP_SIZE * 2)) - MAP_SIZE) * ROOM_SIZE;
+            mesh.position.set(ix, 1, iz);
+            mapGroup.add(mesh);
+            items.push({ mesh: mesh, type: type, active: true });
+        }
+
+        // --- 怪物 ---
+        const mCanvas = document.createElement('canvas');
+        mCanvas.width = 64; mCanvas.height = 64;
+        const mCtx = mCanvas.getContext('2d');
+        mCtx.fillStyle = '#000'; mCtx.fillRect(0,0,64,64);
+        mCtx.fillStyle = '#fff'; 
+        mCtx.beginPath(); mCtx.ellipse(20, 25, 8, 12, 0, 0, Math.PI*2); mCtx.fill();
+        mCtx.beginPath(); mCtx.ellipse(44, 25, 8, 12, 0, 0, Math.PI*2); mCtx.fill();
+        mCtx.fillStyle = '#f00'; 
+        mCtx.beginPath(); mCtx.arc(20, 25, 2, 0, Math.PI*2); mCtx.fill();
+        mCtx.beginPath(); mCtx.arc(44, 25, 2, 0, Math.PI*2); mCtx.fill();
+        const monster = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(mCanvas) }));
+        monster.position.set((-MAP_SIZE + 3)*ROOM_SIZE, 1.5, (-MAP_SIZE + 3)*ROOM_SIZE);
+        scene.add(monster);
+
+        // --- 撤离点 ---
+        // 修复了此处的语法错误（删除了重复的代码片段）
+        const exitPoint = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), new THREE.MeshBasicMaterial({ color: 0x555555, wireframe: true }));
+        exitPoint.position.set((MAP_SIZE-3)*ROOM_SIZE, 5, (MAP_SIZE-3)*ROOM_SIZE);
+        scene.add(exitPoint);
+
+               // --- 输入 ---
+        const keys = {};
+        document.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            keys[e.code] = true;
+            
+            // W键双击检测 - 肾上腺素
+            if (e.key.toLowerCase() === 'w' && gameActive && !playerState.isAdrenaline && !playerState.exhaustion) {
+                const now = Date.now();
+                if (now - playerState.lastWPressTime < 300) activateAdrenaline();
+                playerState.lastWPressTime = now;
+            }
+            
+            // E键 - 背包
+            if (e.key.toLowerCase() === 'e' && gameActive) {
+                playerState.backpackOpen = !playerState.backpackOpen;
+                playerState.shopOpen = false;
+                navState.mapOpen = false;
+                updateUIVisibility();
+                if(playerState.backpackOpen) updateInventoryUI();
+            }
+            
+            // R键 - 商店
+            if (e.key.toLowerCase() === 'r' && gameActive) {
+                playerState.shopOpen = !playerState.shopOpen;
+                playerState.backpackOpen = false;
+                navState.mapOpen = false;
+                updateUIVisibility();
+                if(playerState.shopOpen) updateShopUI();
+            }
+            
+            // F键 - 战术地图
+            if (e.key.toLowerCase() === 'f' && gameActive) {
+                navState.mapOpen = !navState.mapOpen;
+                playerState.backpackOpen = false;
+                playerState.shopOpen = false;
+                updateUIVisibility();
+                const tMap = document.getElementById('tactical-map');
+                if (navState.mapOpen) {
+                    tMap.style.display = 'block';
+                    drawTacticalMap();
+                } else {
+                    tMap.style.display = 'none';
+                }
+            }
+
+            // Q键 - 丢弃物品 (简易逻辑)
+            if (e.key.toLowerCase() === 'q' && gameActive && playerState.backpackOpen) {
+                if (playerState.inventory.length > 0) {
+                    const droppedItem = playerState.inventory.pop();
+                    playerState.weight -= droppedItem.type.weight;
+                    showNotification(`丢弃了: ${droppedItem.type.name}`);
+                    updateInventoryUI();
+                }
+            }
+        });
+
+        document.addEventListener('keyup', e => {
+            keys[e.key.toLowerCase()] = false;
+            keys[e.code] = false;
+        });
+
+        // 鼠标点击 - 战术地图标点
+        document.addEventListener('click', e => {
+            if (navState.mapOpen && gameActive) {
+                const canvas = document.getElementById('tactical-canvas');
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // 转换屏幕坐标到世界坐标
+                const scale = canvas.width / (MAP_SIZE * 2 * ROOM_SIZE);
+                const worldX = (x / scale) - (MAP_SIZE * ROOM_SIZE);
+                const worldZ = (y / scale) - (MAP_SIZE * ROOM_SIZE);
+                
+                navState.targetX = worldX;
+                navState.targetZ = worldZ;
+                showNotification("导航点已标记");
+            }
+        });
+
+        // 鼠标移动 - 视角控制
+        document.addEventListener('mousemove', e => {
+            if(gameActive && !playerState.backpackOpen && !playerState.shopOpen && !navState.mapOpen) {
+                player.mesh.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x -= e.movementY * 0.002;
+                camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+            }
+        });
+
+        function updateUIVisibility() {
+            document.getElementById('backpack-ui').style.display = playerState.backpackOpen ? 'block' : 'none';
+            document.getElementById('shop-ui').style.display = playerState.shopOpen ? 'block' : 'none';
+            document.getElementById('tactical-map').style.display = navState.mapOpen ? 'block' : 'none';
+        }
+
+        // --- 逻辑函数 ---
+        function activateAdrenaline() {
+            playerState.isAdrenaline = true;
+            playerState.adrenalineTimer = 3.0;
+            playerState.exhaustion = false;
+            showNotification("肾上腺素爆发!");
+        }
+
+        function updateInventoryUI() {
+            const list = document.getElementById('inventory-list');
+            list.innerHTML = '';
+            playerState.inventory.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'item-slot';
+                div.innerHTML = `<div class="item-info"><span class="item-name">${item.type.name}</span><span class="item-desc">${item.type.desc} | ${item.type.weight}kg</span></div>`;
+                list.appendChild(div);
+            });
+        }
+
+        function updateShopUI() {
+            const list = document.getElementById('shop-list');
+            const moneyDisplay = document.getElementById('shop-money');
+            list.innerHTML = '';
+            moneyDisplay.innerText = playerMoney;
+            
+            itemTypes.forEach(type => {
+                const div = document.createElement('div');
+                div.className = 'item-slot';
+                const hasItem = playerState.inventory.some(i => i.type.name === type.name);
+                let btnHtml = '';
+                if (hasItem) {
+                    btnHtml = `<button class="action-btn btn-sell" onclick="sellItem('${type.name}', ${type.price})">出售 (+${type.price}$)</button>`;
+                } else {
+                    btnHtml = `<button class="action-btn btn-buy" onclick="buyItem('${type.name}', ${type.price}, ${type.weight})">购买 (-${type.price}$)</button>`;
+                }
+                div.innerHTML = `<div class="item-info"><span class="item-name">${type.name}</span><span class="item-desc">${type.desc} | ${type.weight}kg</span></div>${btnHtml}`;
+                list.appendChild(div);
+            });
+        }
+
+        // 暴露给全局以便HTML onclick调用
+        window.sellItem = function(name, price) {
+            const idx = playerState.inventory.findIndex(i => i.type.name === name);
+            if (idx !== -1) {
+                playerState.inventory.splice(idx, 1);
+                playerMoney += price;
+                updateShopUI();
+                updateInventoryUI();
+                showNotification(`出售了 ${name}`);
+            }
+        };
+
+        window.buyItem = function(name, price, weight) {
+            if (playerMoney >= price) {
+                if (playerState.weight + weight <= playerState.maxWeight) {
+                    playerMoney -= price;
+                    playerState.weight += weight;
+                    const type = itemTypes.find(t => t.name === name);
+                    playerState.inventory.push({ type: type, mesh: null });
+                    updateShopUI();
+                    updateInventoryUI();
+                    showNotification(`购买了 ${name}`);
+                } else {
+                    showNotification("负重不足！");
+                }
+            } else {
+                showNotification("货币不足！");
+            }
+        };
+
+        function showNotification(text) {
+            const el = document.getElementById('notification');
+            el.innerText = text;
+            el.style.opacity = 1;
+            setTimeout(() => { el.style.opacity = 0; }, 3000);
+        }
+
+        function checkCollision(pos) {
+            const box = new THREE.Box3().setFromCenterAndSize(pos, new THREE.Vector3(1, 2, 1));
+            return walls.some(w => box.intersectsBox(new THREE.Box3().setFromObject(w)));
+        }
+
+        function startGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            document.body.requestPointerLock();
+            gameActive = true;
+            animate();
+        }
+
+        // --- 绘图函数 ---
+        function drawMap(ctx, width, height, isTactical) {
+            const scale = width / (MAP_SIZE * 2 * ROOM_SIZE);
+            const cx = MAP_SIZE * ROOM_SIZE;
+            const cz = MAP_SIZE * ROOM_SIZE;
+            
+            // 清空
+            ctx.fillStyle = isTactical ? '#111' : '#000';
+            ctx.fillRect(0, 0, width, height);
+
+            // 1. 绘制特殊地形 (色块)
+            specialZones.forEach(zone => {
+                if (zone.type === 'pool') ctx.fillStyle = 'rgba(0, 0, 255, 0.5)';
+                else if (zone.type === 'roof') ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                else if (zone.type === 'danger') ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.fillRect((zone.x + cx) * scale, (zone.z + cz) * scale, zone.w * scale, zone.h * scale);
+            });
+
+            // 2. 绘制墙壁
+            ctx.fillStyle = '#444';
+            const drawWalls = isTactical ? walls : walls.filter(w => w.position.distanceTo(player.mesh.position) < 100);
+            drawWalls.forEach(w => {
+                ctx.fillRect((w.position.x + cx) * scale, (w.position.z + cz) * scale, 2, 2);
+            });
+
+            // 3. 绘制物品
+            let nearestItemDist = 999;
+            items.forEach(item => {
+                if(item.active) {
+                    ctx.fillStyle = '#ff0';
+                    ctx.fillRect((item.mesh.position.x + cx) * scale, (item.mesh.position.z + cz) * scale, 2, 2);
+                    const dist = player.mesh.position.distanceTo(item.mesh.position);
+                    if (dist < nearestItemDist) nearestItemDist = dist;
+                }
+            });
+
+            // 透视光柱效果
+            const beam = document.getElementById('xray-beam');
+            if (keys['v'] && nearestItemDist < 30) {
+                beam.style.display = 'block';
+            } else {
+                beam.style.display = 'none';
+            }
+
+            // 4. 绘制导航线
+            if (isTactical && navState.targetX !== 0) {
+                ctx.strokeStyle = '#0f0';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo((player.mesh.position.x + cx) * scale, (player.mesh.position.z + cz) * scale);
+                ctx.lineTo((navState.targetX + cx) * scale, (navState.targetZ + cz) * scale);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#0f0';
+                ctx.beginPath();
+                ctx.arc((navState.targetX + cx) * scale, (navState.targetZ + cz) * scale, 5, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            // 5. 绘制实体
+            ctx.fillStyle = '#f00';
+            ctx.beginPath();
+            ctx.arc((monster.position.x + cx)*scale, (monster.position.z + cz)*scale, 3, 0, Math.PI*2);
+            ctx.fill();
+
+            // 6. 绘制撤离点
+            if (missionState.active) {
+                ctx.fillStyle = '#0f0';
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#0f0';
+            } else {
+                ctx.fillStyle = '#555';
+                ctx.shadowBlur = 0;
+            }
+            ctx.fillRect((exitPoint.position.x + cx)*scale, (exitPoint.position.z + cz)*scale, 4, 4);
+            ctx.shadowBlur = 0;
+
+            // 7. 绘制玩家与方向
+            ctx.save();
+            ctx.translate((player.mesh.position.x + cx)*scale, (player.mesh.position.z + cz)*scale);
+            ctx.rotate(player.mesh.rotation.y);
+            ctx.fillStyle = '#0f0';
+            ctx.beginPath();
+            ctx.moveTo(5, 0);
+            ctx.lineTo(-3, 3);
+            ctx.lineTo(-3, -3);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawTacticalMap() {
+            const cvs = document.getElementById('tactical-canvas');
+            const ctx = cvs.getContext('2d');
+            cvs.width = 800;
+            cvs.height = 800;
+            drawMap(ctx, 800, 800, true);
+        }
+
+        function updateMinimap() {
+            const cvs = document.getElementById('minimap-canvas');
+            const ctx = cvs.getContext('2d');
+            cvs.width = 200;
+            cvs.height = 200;
+            drawMap(ctx, 200, 200, false);
+        }
+
+        function animate() {
+            if (!gameActive) return;
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            // 1. 体力与移动逻辑
+            let currentSpeed = player.speed;
+            let staminaDrain = 0;
+            const weightRatio = playerState.weight / playerState.maxWeight;
+            const speedPenalty = 1 - (weightRatio * 0.1);
+            const staminaPenalty = 1 + (weightRatio * 1.5);
+
+            if (playerState.isAdrenaline) {
+                currentSpeed *= 2.5;
+                playerState.adrenalineTimer -= delta;
+                staminaDrain = 30 * delta * staminaPenalty;
+                if (playerState.adrenalineTimer <= 0) {
+                    playerState.isAdrenaline = false;
+                    playerState.exhaustion = true;
+                    showNotification("力竭状态：速度降低");
+                }
+            } else {
+                if (keys['shift'] && keys['w'] && playerState.stamina > 20) {
+                    currentSpeed *= 1.8;
+                    camera.position.y = 0.8;
+                    staminaDrain = 40 * delta * staminaPenalty;
+                } else {
+                    camera.position.y = 1.8;
+                    if (playerState.stamina < playerState.maxStamina) {
+                        playerState.stamina += 10 * delta;
+                        if (playerState.stamina >= playerState.maxStamina) {
+                            playerState.stamina = playerState.maxStamina;
+                            playerState.exhaustion = false;
+                        }
+                    }
+                }
+                if (playerState.exhaustion) currentSpeed *= 0.6;
+            }
+
+            if (staminaDrain > 0) {
+                playerState.stamina -= staminaDrain;
+                if (playerState.stamina <= 0) {
+                    playerState.stamina = 0;
+                    playerState.isAdrenaline = false;
+                }
+            }
+
+            // UI 更新
+            document.getElementById('stamina-bar').style.width = (playerState.stamina / playerState.maxStamina * 100) + '%';
+            document.getElementById('weight-val').style.width = (playerState.weight / playerState.maxWeight * 100) + '%';
+            document.getElementById('weight-text').innerText = `${playerState.weight}/${playerState.maxWeight} kg`;
+            document.getElementById('adrenaline-text').style.opacity = playerState.isAdrenaline ? 1 : 0;
+
+            // 2. 玩家移动
+            const dir = new THREE.Vector3();
+            player.mesh.getWorldDirection(dir);
+            dir.y = 0;
+            dir.normalize();
+            const side = new THREE.Vector3().crossVectors(dir, player.mesh.up).normalize();
+            const move = new THREE.Vector3();
+
+            if (keys['s']) move.add(dir);
+            if (keys['w']) move.sub(dir);
+            if (keys['d']) move.sub(side);
+            if (keys['a']) move.add(side);
+
+            if (move.length() > 0 && !playerState.backpackOpen && !playerState.shopOpen && !navState.mapOpen) {
+                move.normalize().multiplyScalar(currentSpeed * speedPenalty * delta);
+                const next = player.mesh.position.clone();
+                next.x += move.x;
+                next.z += move.z;
+                if (!checkCollision(next)) {
+                    player.mesh.position.x = next.x;
+                    player.mesh.position.z = next.z;
+                }
+            }
+
+            // 3. 拾取与任务逻辑
+            items.forEach(item => {
+                if (item.active && player.mesh.position.distanceTo(item.mesh.position) < 3) {
+                    if (playerState.weight + item.type.weight <= playerState.maxWeight) {
+                        item.active = false;
+                        scene.remove(item.mesh); // 修复：从场景中移除物品
+                        playerState.inventory.push({ type: item.type, mesh: null });
+                        playerState.weight += item.type.weight;
+
+                        // 任务物品处理
+                        if (item.type.isMission) {
+                            missionState.count++;
+                            showNotification(`任务物品已获取: ${item.type.name}`);
+                            
+                            // 检查任务完成
+                            if (missionState.count >= missionState.target) {
+                                missionState.active = true;
+                                showNotification("任务完成！撤离点已激活！");
+                                // 随机传送撤离点
+                                exitPoint.position.x = (Math.floor(Math.random() * (MAP_SIZE * 2)) - MAP_SIZE) * ROOM_SIZE;
+                                exitPoint.position.z = (Math.floor(Math.random() * (MAP_SIZE * 2)) - MAP_SIZE) * ROOM_SIZE;
+                                exitPoint.material.color.setHex(0x00ff00); // 变绿
+                            } else {
+                                showNotification(`任务进度: ${missionState.count}/${missionState.target}`);
+                            }
+                        } else {
+                            showNotification(`拾取: ${item.type.name}`);
+                        }
+                        updateInventoryUI();
+                    }
+                }
+            });
+
+            // 更新任务UI
+            document.getElementById('mission-count').innerText = missionState.count;
+            document.getElementById('mission-target').innerText = missionState.target;
+            document.getElementById('mission-status').innerText = missionState.active ? "前往撤离点！" : "寻找任务物品...";
+
+            // 4. 怪物 AI
+            const mDir = new THREE.Vector3().subVectors(player.mesh.position, monster.position).normalize();
+            monster.position.add(mDir.multiplyScalar(9.5 * delta));
+            monster.lookAt(player.mesh.position);
+
+            // 5. 导航逻辑
+            if (navState.targetX !== 0) {
+                const navDist = Math.sqrt(Math.pow(player.mesh.position.x - navState.targetX, 2) + Math.pow(player.mesh.position.z - navState.targetZ, 2));
+                const navAngle = Math.atan2(navState.targetZ - player.mesh.position.z, navState.targetX - player.mesh.position.x);
+                
+                // 简单的方向提示
+                let dirText = "北";
+                const deg = (navAngle * 180 / Math.PI);
+                if (deg > -45 && deg <= 45) dirText = "东";
+                else if (deg > 45 && deg <= 135) dirText = "南";
+                else if (deg > 135 || deg <= -135) dirText = "西";
+                else if (deg <= -45) dirText = "北";
+
+                let navUI = document.getElementById('nav-ui');
+                if (!navUI) {
+                    navUI = document.createElement('div');
+                    navUI.id = 'nav-ui';
+                    navUI.style.cssText = 'position:absolute;top:100px;left:20px;color:#0f0;z-index:5;';
+                    document.body.appendChild(navUI);
+                }
+                navUI.style.display = 'block';
+                navUI.innerHTML = `导航点距离: ${navDist.toFixed(0)}m<br>方向: ${dirText}`;
+            } else {
+                const navUI = document.getElementById('nav-ui');
+                if (navUI) navUI.style.display = 'none';
+            }
+
+            // 6. 距离与判定
+            const dist = player.mesh.position.distanceTo(monster.position);
+            const exitDist = player.mesh.position.distanceTo(exitPoint.position);
+            document.getElementById('distance').innerText = dist.toFixed(1);
+            document.getElementById('exit-dist').innerText = exitDist.toFixed(1);
+
+            if (exitDist < 3 && missionState.active) {
+                gameActive = false;
+                document.exitPointerLock();
+                document.getElementById('game-over').style.display = 'flex';
+                document.getElementById('end-title').innerText = "成功撤离！";
+                document.getElementById('end-title').style.color = "#4caf50";
+            }
+            if (dist < 1.5) {
+                gameActive = false;
+                document.exitPointerLock();
+                document.getElementById('game-over').style.display = 'flex';
+            }
+
+            updateMinimap();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
